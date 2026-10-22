@@ -56,6 +56,24 @@ class RouteDocBlocker
             'method' => new DocBlock($method->getDocComment() ?: ''),
             'class' => new DocBlock($class->getDocComment() ?: ''),
         ];
+
+        $inheritedClass = $class;
+        while ($docBlocks['class']->hasTag('inheritdoc')) {
+            $inheritedClass = $inheritedClass->getParentClass();
+            $inheritedDoc = str_replace('/**', '', $inheritedClass->getDocComment());
+            $inheritedDoc = str_replace('*/', '', $inheritedDoc);
+            $updatedDoc = preg_replace('/\{?@inherit[Dd]oc\}?/', $inheritedDoc, $class->getDocComment());
+            $docBlocks['class'] = new DocBlock($updatedDoc);
+        }
+
+        if ($docBlocks['method']->hasTag('inheritdoc')) {
+            $inheritedMethod = $class->getParentClass()->getMethod($methodName);
+            $inheritedDoc = str_replace('/**', '', $inheritedMethod->getDocComment());
+            $inheritedDoc = str_replace('*/', '', $inheritedDoc);
+            $updatedDoc = preg_replace('/\{?@inherit[Dd]oc\}?/', $inheritedDoc, $method->getDocComment());
+            $docBlocks['method'] = new DocBlock($updatedDoc);
+        }
+
         self::cacheDocBlocks($route, $normalizedClassName, $methodName, $docBlocks);
 
         return $docBlocks;
