@@ -800,10 +800,12 @@ trait ParsesValidationRules
 
             case 'required_if':
             case 'required_unless':
+                // required_if uses :value and required_unless :values; replace :values first so it isn't cut in half
+                $values = w::getListOfValuesAsFriendlyHtmlString(array_slice($arguments, 1));
                 $parameterData['description'] .= $this->formatRuleDescription(
                     $parameterData,
                     $this->getDescription($rule),
-                    [':other' => $arguments[0], ':value' => w::getListOfValuesAsFriendlyHtmlString(array_slice($arguments, 1))]
+                    [':other' => $arguments[0], ':values' => $values, ':value' => $values]
                 );
 
                 break;
@@ -812,10 +814,15 @@ trait ParsesValidationRules
             case 'required_without':
             case 'required_with_all':
             case 'required_without_all':
+                // getDescription() turns "is not present" into "must be present", which inverts required_without
+                $description = $rule === 'required_without'
+                    ? 'The value is required when :values is not present.'
+                    : $this->getDescription($rule);
+                $conjunction = str_ends_with($rule, '_all') ? 'and' : 'or';
                 $parameterData['description'] .= $this->formatRuleDescription(
                     $parameterData,
-                    $this->getDescription($rule),
-                    [':values' => w::getListOfValuesAsFriendlyHtmlString($arguments)]
+                    $description,
+                    [':values' => w::getListOfValuesAsFriendlyHtmlString($arguments, $conjunction)]
                 );
 
                 break;

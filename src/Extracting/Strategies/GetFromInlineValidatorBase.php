@@ -188,16 +188,29 @@ class GetFromInlineValidatorBase extends Strategy
                     }
 
                     try {
-                        $constant = constant(sprintf('%s::%s', $className, $constName));
+                        $args[] = constant(sprintf('%s::%s', $className, $constName));
                     } catch (\Throwable) {
-                        continue;
+                        // Leaving the argument out would make sprintf() throw, so treat the call as unreadable
+                        return $this->unreadableFunctionRule($rule);
                     }
-                    $args[] = $constant;
+                } else {
+                    // Variables, method calls etc. have no value in the AST
+                    return $this->unreadableFunctionRule($rule);
                 }
             }
 
-            return new Node\Scalar\String_(sprintf(...$args), $rule->getAttributes());
+            try {
+                return new Node\Scalar\String_(sprintf(...$args), $rule->getAttributes());
+            } catch (\Throwable) {
+                return $this->unreadableFunctionRule($rule);
+            }
         }
+
+        return $this->unreadableFunctionRule($rule);
+    }
+
+    protected function unreadableFunctionRule(Node\Expr\FuncCall $rule): Node\Scalar\String_
+    {
 
         // Any other call cannot be evaluated from the AST, so it becomes a placeholder Scribe
         // ignores rather than stopping the run. Same reasoning as parseClassBasedRule().

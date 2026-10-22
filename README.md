@@ -10,6 +10,9 @@
 
 Scribe helps you generate API documentation for humans from your Laravel codebase. See a live example at [demo.scribe.knuckles.wtf](https://demo.scribe.knuckles.wtf).
 
+> [!NOTE]
+> This is the RonoIT fork used by RonoPortal. The changes from upstream are described in [docs/fork-documentation.md](docs/fork-documentation.md).
+
 ## Features
 - Useful output:
   - Pretty single-page HTML doc, with human-friendly text, code samples, and in-browser API tester ("Try It Out")

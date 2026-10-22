@@ -1,7 +1,8 @@
 {
     "preset": "laravel",
     "notPath": [
-        "tests/ArraySubsetAsserts.php"
+        "tests/ArraySubsetAsserts.php",
+        "tests/Fixtures/TestInheritDocController.php"
     ],
     "rules": {
         "align_multiline_comment": true,

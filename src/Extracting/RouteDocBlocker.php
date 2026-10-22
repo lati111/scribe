@@ -53,30 +53,47 @@ class RouteDocBlocker
         $method = u::getReflectedRouteMethod([$className, $methodName]);
 
         $docBlocks = [
-            'method' => new DocBlock($method->getDocComment() ?: ''),
-            'class' => new DocBlock($class->getDocComment() ?: ''),
+            'method' => new DocBlock(self::resolveInheritedDoc(
+                $method->getDocComment() ?: '',
+                // Closure routes are a ReflectionFunction, which has nothing to inherit from
+                $method instanceof \ReflectionMethod ? $method->getDeclaringClass()->getParentClass() : false,
+                fn (\ReflectionClass $parent) => $parent->hasMethod($methodName) ? $parent->getMethod($methodName) : null
+            )),
+            'class' => new DocBlock(self::resolveInheritedDoc(
+                $class->getDocComment() ?: '',
+                $class->getParentClass(),
+                fn (\ReflectionClass $parent) => $parent
+            )),
         ];
-
-        $inheritedClass = $class;
-        while ($docBlocks['class']->hasTag('inheritdoc')) {
-            $inheritedClass = $inheritedClass->getParentClass();
-            $inheritedDoc = str_replace('/**', '', $inheritedClass->getDocComment());
-            $inheritedDoc = str_replace('*/', '', $inheritedDoc);
-            $updatedDoc = preg_replace('/\{?@inherit[Dd]oc\}?/', $inheritedDoc, $class->getDocComment());
-            $docBlocks['class'] = new DocBlock($updatedDoc);
-        }
-
-        if ($docBlocks['method']->hasTag('inheritdoc')) {
-            $inheritedMethod = $class->getParentClass()->getMethod($methodName);
-            $inheritedDoc = str_replace('/**', '', $inheritedMethod->getDocComment());
-            $inheritedDoc = str_replace('*/', '', $inheritedDoc);
-            $updatedDoc = preg_replace('/\{?@inherit[Dd]oc\}?/', $inheritedDoc, $method->getDocComment());
-            $docBlocks['method'] = new DocBlock($updatedDoc);
-        }
 
         self::cacheDocBlocks($route, $normalizedClassName, $methodName, $docBlocks);
 
         return $docBlocks;
+    }
+
+    /**
+     * Replace the inheritdoc tag (with or without braces) with the docblock of the parent, walking up
+     * the parents for as long as the inherited docblock itself contains the tag.
+     * The tag is left as is when there is no parent (or the parent has no such method).
+     *
+     * @param  \Closure(\ReflectionClass): (\ReflectionClass|\ReflectionMethod|null)  $getReflector
+     */
+    protected static function resolveInheritedDoc(string $docComment, \ReflectionClass|false $parent, \Closure $getReflector): string
+    {
+        $pattern = '/\{?@inherit[Dd]oc\}?/';
+
+        while ($parent && preg_match($pattern, $docComment)) {
+            $reflector = $getReflector($parent);
+            if ($reflector === null) {
+                break;
+            }
+
+            $inheritedDoc = str_replace(['/**', '*/'], '', $reflector->getDocComment() ?: '');
+            $docComment = preg_replace($pattern, $inheritedDoc, $docComment, 1);
+            $parent = $parent->getParentClass();
+        }
+
+        return $docComment;
     }
 
     /**

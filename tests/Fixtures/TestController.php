@@ -773,6 +773,17 @@ class TestController extends Controller
         ]);
     }
 
+    public function withRulesNotReadableFromAst(Request $request)
+    {
+        $request->validate([
+            'status' => ['required', sprintf('in:%s,%s', TestStatusNames::OPEN, TestStatusNames::CLOSED)],
+            'email' => ['required', 'email', Rule::unique('users')->ignore(1)],
+            'image' => ['required', 'file', new Rules\Dimensions(['max_width' => 100])],
+            'name' => ['required', 'string', trim(' max:20 ')],
+            'code' => ['required', 'string', sprintf('max:%s', UnknownClass::LENGTH)],
+        ]);
+    }
+
     public function withInjectedEnumAndModel(Category $category, TestUser $user)
     {
         return null;

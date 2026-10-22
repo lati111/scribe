@@ -274,6 +274,49 @@ class GetFromInlineValidatorTest extends BaseLaravelTest
         ));
     }
 
+    public function test_can_fetch_rules_which_are_not_plain_strings()
+    {
+        $endpoint = $this->endpoint(function (ExtractedEndpointData $e) {
+            $e->method = new \ReflectionMethod(TestController::class, 'withRulesNotReadableFromAst');
+        });
+
+        $results = $this->fetchViaBodyParams($endpoint);
+
+        $this->assertArraySubset([
+            // sprintf() with class constants is evaluated
+            'status' => [
+                'type' => 'string',
+                'required' => true,
+                'enumValues' => ['open', 'closed'],
+            ],
+            // Rule::unique(...)->ignore(...) becomes the plain unique rule
+            'email' => [
+                'type' => 'string',
+                'required' => true,
+                'description' => 'Must be a valid email address.<br>Must be unique.',
+            ],
+            // A rule object is skipped, the rules next to it still apply
+            'image' => [
+                'type' => 'file',
+                'required' => true,
+                'description' => '',
+            ],
+            // Any other function call is skipped instead of stopping the run
+            'name' => [
+                'type' => 'string',
+                'required' => true,
+                'description' => '',
+            ],
+            // So is sprintf() with a constant that can't be found
+            'code' => [
+                'type' => 'string',
+                'required' => true,
+                'description' => '',
+            ],
+        ], $results);
+        $this->assertContains($results['status']['example'], ['open', 'closed']);
+    }
+
     protected function endpoint(\Closure $configure): ExtractedEndpointData
     {
         $endpoint = new class extends ExtractedEndpointData
