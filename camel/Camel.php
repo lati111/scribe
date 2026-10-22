@@ -106,74 +106,23 @@ class Camel
      */
     public static function sortByConfigFileOrder(array $groupedEndpoints, array $configFileOrder): array
     {
-        if (empty($configFileOrder)) {
-            ksort($groupedEndpoints, SORT_NATURAL);
+        $groupsCollection = collect($groupedEndpoints)->sortBy(fn (array $group) => $group['order']);
 
-            return $groupedEndpoints;
+        $sortedGroups = [];
+        foreach ($groupsCollection as $group) {
+            $group['endpoints'] = collect($group['endpoints'])
+                ->sortBy(function (OutputEndpointData $endpoint) {
+                    $subgroupOrder = $endpoint->metadata->custom['subgroup-order'] ?? 999;
+                    $endpointOrder = $endpoint->metadata->custom['endpoint-order'] ?? 999;
+
+                    return $subgroupOrder * 1000 + $endpointOrder;
+                })
+                ->all();
+
+            $sortedGroups[] = $group;
         }
 
-        // First, sort groups
-        $groupsOrder = Utils::getTopLevelItemsFromMixedConfigList($configFileOrder);
-        $groupsCollection = collect($groupedEndpoints);
-        $wildcardPosition = array_search('*', $groupsOrder);
-        if ($wildcardPosition !== false) {
-            $promotedGroups = array_splice($groupsOrder, 0, $wildcardPosition);
-            $demotedGroups = array_splice($groupsOrder, 1);
-
-            $promotedOrderedGroups = $groupsCollection->filter(fn ($group, $groupName) => in_array($groupName, $promotedGroups))
-                ->sortKeysUsing(self::getOrderListComparator($promotedGroups));
-            $demotedOrderedGroups = $groupsCollection->filter(fn ($group, $groupName) => in_array($groupName, $demotedGroups))
-                ->sortKeysUsing(self::getOrderListComparator($demotedGroups));
-
-            $nonWildcardGroups = array_merge($promotedGroups, $demotedGroups);
-            $wildCardOrderedGroups = $groupsCollection->filter(fn ($group, $groupName) => ! in_array($groupName, $nonWildcardGroups))
-                ->sortKeysUsing(self::getOrderListComparator($demotedGroups));
-
-            $groupedEndpoints = $promotedOrderedGroups->merge($wildCardOrderedGroups)
-                ->merge($demotedOrderedGroups);
-        } else {
-            $groupedEndpoints = $groupsCollection->sortKeysUsing(self::getOrderListComparator($groupsOrder));
-        }
-
-        return $groupedEndpoints->map(function (array $group, string $groupName) use ($configFileOrder) {
-            $sortedEndpoints = collect($group['endpoints']);
-
-            if (isset($configFileOrder[$groupName])) {
-                // Second-level order list. Can contain endpoint or subgroup names
-                $level2Order = Utils::getTopLevelItemsFromMixedConfigList($configFileOrder[$groupName]);
-                $sortedEndpoints = $sortedEndpoints->sortBy(
-                    function (OutputEndpointData $e) use ($configFileOrder, $level2Order) {
-                        $endpointIdentifier = $e->httpMethods[0].' /'.$e->uri;
-
-                        // First, check if there's an ordering specified for the endpoint itself
-                        $indexOfEndpointInL2Order = array_search($endpointIdentifier, $level2Order);
-                        if ($indexOfEndpointInL2Order !== false) {
-                            return $indexOfEndpointInL2Order;
-                        }
-
-                        // Check if there's an ordering for the endpoint's subgroup
-                        $indexOfSubgroupInL2Order = array_search($e->metadata->subgroup, $level2Order);
-                        if ($indexOfSubgroupInL2Order !== false) {
-                            // There's a subgroup order; check if there's an endpoints order within that
-                            $orderOfEndpointsInSubgroup = $configFileOrder[$e->metadata->groupName][$e->metadata->subgroup] ?? [];
-                            $indexOfEndpointInSubGroup = array_search($endpointIdentifier, $orderOfEndpointsInSubgroup);
-
-                            return ($indexOfEndpointInSubGroup === false)
-                                ? $indexOfSubgroupInL2Order
-                                : ($indexOfSubgroupInL2Order + ($indexOfEndpointInSubGroup * 0.1));
-                        }
-
-                        return INF;
-                    },
-                );
-            }
-
-            return [
-                'name' => $groupName,
-                'description' => $group['description'],
-                'endpoints' => $sortedEndpoints->all(),
-            ];
-        })->values()->all();
+        return $sortedGroups;
     }
 
     /**
@@ -188,6 +137,7 @@ class Camel
             return [
                 'name' => $group['name'],
                 'description' => $group['description'],
+                'order' => $group['endpoints'][0]['metadata']['custom']['group-order'] ?? 999,
                 'endpoints' => array_map(
                     fn (array $endpoint) => OutputEndpointData::fromExtractedEndpointArray($endpoint),
                     $group['endpoints']
