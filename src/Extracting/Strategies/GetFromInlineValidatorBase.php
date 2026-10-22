@@ -63,6 +63,14 @@ class GetFromInlineValidatorBase extends Strategy
             return [[], []];
         }
 
+        // Turn rules Scribe cannot read from the AST (function calls, rule objects) into strings
+        foreach ($validationRules->items as $item) {
+            /** @var Node\ArrayItem $item */
+            if ($item->value instanceof Node\Expr\Array_) {
+                $item->value = $this->parseArrayRules($item->value);
+            }
+        }
+
         $rules = [];
         $customParameterData = [];
         foreach ($validationRules->items as $item) {
@@ -122,6 +130,113 @@ class GetFromInlineValidatorBase extends Strategy
         }
 
         return [$rules, $customParameterData];
+    }
+
+    protected function parseArrayRules(Node\Expr\Array_ $rules): Node\Expr\Array_
+    {
+        foreach ($rules->items as $item) {
+            $rule = $item->value;
+
+            if ($rule instanceof Node\Expr\FuncCall) {
+                $item->value = $this->parseFunctionRule($rule);
+            } elseif ($rule instanceof Node\Expr\MethodCall) {
+                if ($rule->var instanceof Node\Expr\StaticCall
+                    && $rule->var->class instanceof Node\Name
+                    && $rule->var->class->getLast() === 'Rule'
+                    && $rule->var->name instanceof Node\Identifier
+                    && $rule->var->name->name === 'unique'
+                ) {
+                    $item->value = new Node\Scalar\String_('unique', $rule->getAttributes());
+                }
+
+                //                $parsedRule = $this->parseRuleMethodRule($rule);
+                //                if ($parsedRule !== null) {
+                //                    $item->value = $parsedRule;
+                //                }
+            } elseif ($rule instanceof Node\Expr\New_ && $this->extractEnumClassFromArrayItem($item) === null) {
+                $item->value = $this->parseClassBasedRule($rule);
+            }
+        }
+
+        return $rules;
+    }
+
+    protected function parseFunctionRule(Node\Expr\FuncCall $rule): Node\Scalar\String_
+    {
+        if ($rule->name instanceof Node\Name && $rule->name->getLast() === 'sprintf') {
+            $args = [];
+
+            foreach ($rule->getArgs() as $arg) {
+                $arg = $arg->value;
+                if ($arg instanceof Node\Scalar\String_) {
+                    $args[] = $arg->value;
+                } elseif ($arg instanceof Node\Expr\ClassConstFetch
+                    && $arg->class instanceof Node\Name
+                    && $arg->name instanceof Node\Identifier
+                ) {
+                    $className = $arg->class->getAttribute('resolvedName')?->toString() ?? $arg->class->toString();
+                    $constName = $arg->name->name;
+                    // If short class name, try to resolve to FQCN via declared classes
+                    if (! class_exists($className)) {
+                        foreach (get_declared_classes() as $declaredClass) {
+                            if ($declaredClass === $className || str_ends_with($declaredClass, '\\'.$className)) {
+                                $className = $declaredClass;
+
+                                break;
+                            }
+                        }
+                    }
+
+                    try {
+                        $constant = constant(sprintf('%s::%s', $className, $constName));
+                    } catch (\Throwable) {
+                        continue;
+                    }
+                    $args[] = $constant;
+                }
+            }
+
+            return new Node\Scalar\String_(sprintf(...$args), $rule->getAttributes());
+        }
+
+        // Any other call cannot be evaluated from the AST, so it becomes a placeholder Scribe
+        // ignores rather than stopping the run. Same reasoning as parseClassBasedRule().
+        return new Node\Scalar\String_(
+            'call:'.($rule->name instanceof Node\Name ? $rule->name->getLast() : 'expression'),
+            $rule->getAttributes()
+        );
+    }
+
+    /**
+     * Replace a chained rule (`Rule::unique(...)->ignore(...)`) with a placeholder.
+     *
+     * Not currently reached — the caller is commented out and `Rule::unique()` chains are handled
+     * inline in parseArrayRules() — but kept so re-enabling it cannot stop a generate run.
+     */
+    protected function parseRuleMethodRule(Node\Expr\MethodCall $rule): ?Node\Scalar\String_
+    {
+        $method = $rule->name instanceof Node\Identifier ? $rule->name->name : 'expression';
+
+        return new Node\Scalar\String_('method:'.$method, $rule->getAttributes());
+    }
+
+    /**
+     * Replace a class-based rule (`new SomeRule`) with a placeholder Scribe can read past.
+     *
+     * A rule object carries its logic in PHP, so there is nothing here to turn into a documented
+     * constraint — the parameter is described by the plain rules next to it instead. An
+     * unrecognised rule string is ignored by the rule parser, which is exactly what we want.
+     *
+     * The name is prefixed so it can never collide with a real rule: Scribe splits a rule string on
+     * ":" into name and arguments, and there is no Laravel rule called "class".
+     */
+    protected function parseClassBasedRule(Node\Expr\New_ $rule): Node\Scalar\String_
+    {
+        $className = $rule->class instanceof Node\Name
+            ? $rule->class->getLast()
+            : 'anonymous';
+
+        return new Node\Scalar\String_('class:'.$className, $rule->getAttributes());
     }
 
     protected function extractEnumClassFromArrayItem(Node\ArrayItem $arrayItem): ?string
